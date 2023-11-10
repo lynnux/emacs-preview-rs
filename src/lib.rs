@@ -13,14 +13,15 @@ use std::{
     },
 };
 use tokio::sync::oneshot;
-
+use tokio::fs::File;
 use hyper::body::{Bytes, HttpBody};
 use hyper::header::{HeaderMap, HeaderValue};
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Error, Response, Server};
+use hyper::{Error, Response, Server, Body, Method, StatusCode, Request, Result};
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 struct Web {
     handle: Option<(JoinHandle<()>, oneshot::Sender<()>)>, // 线程join和信号send都需要self
@@ -45,60 +46,49 @@ fn debug_msg(msg: &str) {
     }
 }
 
-struct Body {
-    // Our Body type is !Send and !Sync:
-    _marker: PhantomData<*const ()>,
-    data: Option<Bytes>,
+static NOTFOUND: &[u8] = b"Not Found";
+/// HTTP status code 404
+fn not_found() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(NOTFOUND.into())
+        .unwrap()
+}
+async fn simple_file_send(filename: &str) -> Result<Response<Body>> {
+    // Serve a file by asynchronously reading it by chunks using tokio-util crate.
+    if let Ok(file) = File::open(filename).await {
+        let stream = FramedRead::new(file, BytesCodec::new());
+        let body = Body::wrap_stream(stream);
+        return Ok(Response::new(body));
+    }
+    Ok(not_found())
 }
 
-impl From<String> for Body {
-    fn from(a: String) -> Self {
-        Body {
-            _marker: PhantomData,
-            data: Some(a.into()),
-        }
+async fn response_examples(req: Request<Body>, web_root: Arc<String>) -> Result<Response<Body>> {
+    if req.method() == &Method::GET{
+        let fullpath = (*web_root).clone() + req.uri().path();
+        simple_file_send(&fullpath).await
+    }
+    else{
+        Ok(not_found())
     }
 }
-
-impl HttpBody for Body {
-    type Data = Bytes;
-    type Error = Error;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        Poll::Ready(self.get_mut().data.take().map(Ok))
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap<HeaderValue>>, Self::Error>> {
-        Poll::Ready(Ok(None))
-    }
-}
-
-// async fn response_examples(req: Request<Body>) -> Result<Response<Body>> {
-//     match (req.method(), req.uri().path()) {
-//         (&Method::GET, "/") | (&Method::GET, "/index.html") => simple_file_send(INDEX).await,
-//         (&Method::GET, "/no_file.html") => {
-//             // Test what happens when file cannot be be found
-//             simple_file_send("this_file_should_not_exist.html").await
-//         }
-//         _ => Ok(not_found()),
-//     }
-// }
 // (ignore-errors (module-load "H:/prj/rust/emacs-preview-rs/target/release/emacs_preview_rs.dll"))
-// (emacs-preview-rs/web-server-start "root" "127.0.0.1" 1888)
-// (emacs-preview-rs/web-server-stop 3)
+// (ignore-errors (module-load "f:/prj/rust/emacs-preview-rs/target/release/emacs_preview_rs.dll"))
+// (emacs-preview-rs/web-server-start "E:/boost_1_66_0/doc/html" "127.0.0.1" 1888)
+// (emacs-preview-rs/web-server-stop 4)
 async fn run(web_root: String, host: String, port: u16, stop_sig: oneshot::Receiver<()>) {
     debug_msg(&format!("run: {}:{} at {}", host, port, web_root));
     if let Ok(addr) = format!("{}:{}", host, port).parse() {
-        let make_service = make_service_fn(move |_| async move {
-            Ok::<_, Error>(service_fn(move |_| async move {
-                Ok::<_, Error>(Response::new(Body::from(format!("Request #{}", 1))))
-            }))
+        let web_root = Arc::new(web_root);
+        let make_service = make_service_fn(|_|{
+            let web_root = web_root.clone();
+            async  {
+                Ok::<_, Error>(service_fn(move |req| {
+                    let web_root = web_root.clone();
+                    response_examples(req, web_root)
+                }))
+            }
         });
 
         let server = Server::bind(&addr).executor(LocalExec).serve(make_service);
