@@ -79,6 +79,19 @@ impl HttpBody for Body {
     }
 }
 
+// async fn response_examples(req: Request<Body>) -> Result<Response<Body>> {
+//     match (req.method(), req.uri().path()) {
+//         (&Method::GET, "/") | (&Method::GET, "/index.html") => simple_file_send(INDEX).await,
+//         (&Method::GET, "/no_file.html") => {
+//             // Test what happens when file cannot be be found
+//             simple_file_send("this_file_should_not_exist.html").await
+//         }
+//         _ => Ok(not_found()),
+//     }
+// }
+// (ignore-errors (module-load "H:/prj/rust/emacs-preview-rs/target/release/emacs_preview_rs.dll"))
+// (emacs-preview-rs/web-server-start "root" "127.0.0.1" 1888)
+// (emacs-preview-rs/web-server-stop 3)
 async fn run(web_root: String, host: String, port: u16, stop_sig: oneshot::Receiver<()>) {
     debug_msg(&format!("run: {}:{} at {}", host, port, web_root));
     if let Ok(addr) = format!("{}:{}", host, port).parse() {
@@ -167,8 +180,8 @@ fn web_server_stop(web_handle: usize) -> emacs::Result<bool> {
     let mut webs = GLOBAL_WEBS.lock().unwrap();
     if let Some(ref mut web) = webs.get_mut(&web_handle) {
         if let Some((t, s)) = web.handle.take() {
+            s.send(()).ok(); // 测试不会马上结束，需要网页再访问一次才退出，不过问题不大，网页有js自动刷新请求
             t.join().ok();
-            s.send(()).ok();
         }
     }
     Ok(true)
@@ -177,6 +190,14 @@ fn web_server_stop(web_handle: usize) -> emacs::Result<bool> {
 #[defun]
 fn web_server_set_content(_web_handle: usize) -> emacs::Result<usize> {
     Ok(0)
+}
+
+// Emacs won't load the module without this.
+emacs::plugin_is_GPL_compatible!();
+
+#[emacs::module(separator = "/")]
+fn init(_: &emacs::Env) -> emacs::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
