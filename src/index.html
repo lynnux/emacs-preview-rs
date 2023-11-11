@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Emacs Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="/static/css/markdown.css">
+  </head>
+  <body>
+    <div class="container">
+      <div id="preview">Text Preview</div>
+    </div>
+  </body>
+  <script src="/static/js/jquery.min.js"></script>
+  <script src="/static/js/marked.min.js"></script>
+  <script src="/static/js/highlight.min.js"></script>
+  <script src="/static/js/mermaid.js"></script>
+  <script type="text/javascript">
+    $(function() {
+        var extension = {
+            mermaid: typeof extension !== "undefined" ? extension.mermaid: false
+        }
+        var renderer = new marked.Renderer()
+        renderer.defaultCode = renderer.code
+        renderer.code = function (code, language, escaped) {
+            if ((language || "").match(/^mermaid/)) {
+                extension.mermaid = true;
+                return '<div class="mermaid">' + code + '</div>';
+            }
+            return this.defaultCode(code, language, escaped)
+        };
+
+        marked.setOptions({
+            renderer: renderer,
+            highlight: function(code) {
+                return hljs.highlightAuto(code).value;
+            }
+        })
+        
+        var callback = function (data) {
+            if (data.endsWith("<!-- iframe -->")) {
+                var iframe = document.createElement("iframe");
+                iframe.style.width = "100%";
+                iframe.style.height = "100%";
+                iframe.style.position = "absolute";
+                iframe.style.border = "none";
+                $("#preview").html(iframe)
+
+                var frameDoc = iframe.document;
+                if(iframe.contentWindow) {
+                    frameDoc = iframe.contentWindow.document; // IE
+                }
+                frameDoc.open();
+                frameDoc.writeln(data);
+                frameDoc.close();
+
+                var position = $("iframe").contents().find("#position-percentage").html();
+                if (position) {
+                    $("iframe").contents().scrollTop(scroll = $("iframe").contents().height() * (position / 100));
+                }
+                $("body").css("margin","0")
+                $("body").css("padding","0")
+            }else {
+                $("#preview").html(marked(data))
+                if (extension.mermaid) {
+                    mermaid.init();
+                }
+                var position = $("#position-percentage").html();
+                if (position) {
+                    $("html, body").animate({ scrollTop: $(document).height() * (position / 100)}, 300);
+                }
+            }
+        };
+        var last_content_index = "";
+        setInterval(function(){
+          $.get("/get_content_index", function(data, status){
+          if (last_content_index != data) {
+            $.get("/get_content", function(data, status){
+            callback(data)
+            });
+          }
+        });
+            
+        }, 500);
+    });
+  </script>
+</html>

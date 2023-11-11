@@ -91,7 +91,7 @@ async fn response_examples(req: Request<Body>, context: Arc<WebContext>) -> Resu
 // (ignore-errors (module-load "f:/prj/rust/emacs-preview-rs/target/release/emacs_preview_rs.dll"))
 // (emacs-preview-rs/web-server-start "f:/prj/rust/emacs-preview-rs/src/" "127.0.0.1" 1888)
 // (emacs-preview-rs/web-server-stop 4)
-// (emacs-preview-rs/web-server-set-content 2 "aaa")
+// (emacs-preview-rs/web-server-set-content 2 "<center>aaa</center>")
 async fn run(web_context : Arc<WebContext>, host: String, port: u16, stop_sig: oneshot::Receiver<()>) {
     debug_msg(&format!("run: {}:{} at {}", host, port, web_context.web_root));
     if let Ok(addr) = format!("{}:{}", host, port).parse() {
