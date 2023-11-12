@@ -69,6 +69,21 @@
   :type 'cons
   :group 'emacs-preview)
 
+(defcustom emacs-preview:css-file
+  '("/static/css/markdown.css")
+  "Custom preview css style."
+  :type 'list
+  :group 'emacs-preview)
+
+(defcustom emacs-preview:js-file
+  '("/static/js/jquery.min.js"
+    "/static/js/marked.min.js"
+    "/static/js/highlight.min.js"
+    "/static/js/mermaid.js")
+  "Custom preview js script."
+  :type 'list
+  :group 'emacs-preview)
+
 (defcustom emacs-preview:auto-hook nil
   "Hook for user specified auto preview instance.
 
@@ -89,6 +104,7 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
 
 (defvar emacs-preview:web-index nil)
 (defvar emacs-preview:home-path (file-name-directory load-file-name))
+(defvar emacs-preview:preview-file (concat emacs-preview:home-path "index.html"))
 
 (defun emacs-preview:position-percent ()
   "Preview position percent."
@@ -104,8 +120,9 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
     (setq httpd-root default-directory)
     (unless text-content-func
       (setq text-content-func (cdr (assoc t emacs-preview:text-content))))
+    (emacs-preview-rs/web-server-set-root emacs-preview:web-index (vconcat [] (list default-directory emacs-preview:home-path)))
     (emacs-preview-rs/web-server-set-content
-     emacs-preview:web-index (concat (emacs-preview:position-percent) (funcall text-content-func)))))
+     emacs-preview:web-index "/get_content" (concat (emacs-preview:position-percent) (funcall text-content-func)))))
 
 (defun emacs-preview:send-to-server (&optional ws)
   "Send the `emacs-preview' preview to WS clients."
@@ -113,6 +130,38 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
          (bound-and-true-p emacs-preview-mode)
              (member major-mode emacs-preview:allow-modes))
     (emacs-preview:send-preview)))
+
+(defun emacs-preview:css-template ()
+  "Css Template."
+  (mapconcat
+   (lambda (x)
+     (if (string-match-p "^[\n\t ]*<style" x) x
+       (format "<link rel=\"stylesheet\" type=\"text/css\" href=\"%s\">" x)))
+   emacs-preview:css-file "\n"))
+
+(defun emacs-preview:js-template ()
+  "Css Template."
+  (mapconcat
+   (lambda (x)
+     (if (string-match-p "^[\n\t ]*<script" x) x
+       (format "<script src=\"%s\"></script>" x)))
+   emacs-preview:js-file "\n"))
+
+(defun emacs-preview:preview-template ()
+  "Template."
+  (with-temp-buffer
+    (insert-file-contents emacs-preview:preview-file)
+    (when (search-forward "{{ css }}" nil t)
+      (replace-match (emacs-preview:css-template) t))
+    (when (search-forward "{{ js }}" nil t)
+      (replace-match (emacs-preview:js-template) t))
+    (when (search-forward "{{ websocket }}" nil t)
+      (replace-match (format
+                      "%s:%s"
+                      emacs-preview:host
+                      emacs-preview:websocket-port)
+                     t))
+    (buffer-string)))
 
 (defun emacs-preview:html-content ()
   "Get file html content."
@@ -151,9 +200,11 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
 (defun emacs-preview:init ()
   "Preview init."
   (unless emacs-preview:web-index
-    (let ((ret (emacs-preview-rs/web-server-start emacs-preview:home-path emacs-preview:host emacs-preview:port)))
+    (let ((ret (emacs-preview-rs/web-server-start emacs-preview:host emacs-preview:port)))
       (when (> ret 0)
-        (setq emacs-preview:web-index ret))))
+        (setq emacs-preview:web-index ret)
+        (emacs-preview-rs/web-server-set-root emacs-preview:web-index (vconcat [] (list emacs-preview:home-path)))
+        (emacs-preview-rs/web-server-set-content emacs-preview:web-index "/" (emacs-preview:preview-template)))))
   (when emacs-preview:browser-open (emacs-preview:open-browser))
   (when emacs-preview:auto-update
     (add-hook 'buffer-list-update-hook 'emacs-preview:send-to-server)
@@ -179,7 +230,7 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
 
 ;;;###autoload
 (define-minor-mode emacs-preview-mode
-  "Maple preview mode"
+  "Emacs preview mode"
   :group      'emacs-preview
   :init-value nil
   :global     t

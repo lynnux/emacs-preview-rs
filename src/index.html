@@ -4,17 +4,14 @@
     <meta charset="utf-8">
     <title>Emacs Preview</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" type="text/css" href="/static/css/markdown.css">
+    {{ css }}
   </head>
   <body>
     <div class="container">
       <div id="preview">Text Preview</div>
     </div>
   </body>
-  <script src="/static/js/jquery.min.js"></script>
-  <script src="/static/js/marked.min.js"></script>
-  <script src="/static/js/highlight.min.js"></script>
-  <script src="/static/js/mermaid.js"></script>
+  {{ js }}
   <script type="text/javascript">
     $(function() {
         var extension = {
