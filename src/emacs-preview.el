@@ -34,7 +34,7 @@
   :group 'text
   :prefix "emacs-preview:")
 
-(defcustom emacs-preview:allow-modes '(org-mode markdown-mode html-mode web-mode)
+(defcustom emacs-preview:allow-modes '(org-mode markdown-mode html-mode web-mode mhtml-mode)
   "Allow preview modes."
   :type 'list
   :group 'emacs-preview)
@@ -84,6 +84,9 @@
   :type 'list
   :group 'emacs-preview)
 
+(defcustom emacs-preview:check-change-timer-sec 0.5 
+  "Timer to check position change of current buffer")
+
 (defcustom emacs-preview:auto-hook nil
   "Hook for user specified auto preview instance.
 
@@ -105,6 +108,8 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
 (defvar emacs-preview:web-index nil)
 (defvar emacs-preview:home-path (file-name-directory load-file-name))
 (defvar emacs-preview:preview-file (concat emacs-preview:home-path "index.html"))
+(defvar emacs-preview:timer nil)
+(defvar-local emacs-preview:local-pos nil)
 
 (defun emacs-preview:position-percent ()
   "Preview position percent."
@@ -197,6 +202,11 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
   (browse-url
    (format "http://%s:%s" emacs-preview:host emacs-preview:port)))
 
+(defun emacs-preview:timer-callback()
+  (unless (eq emacs-preview:local-pos (point))
+    (setq emacs-preview:local-pos (point))
+    (emacs-preview:send-to-server)))
+
 (defun emacs-preview:init ()
   "Preview init."
   (unless emacs-preview:web-index
@@ -207,7 +217,9 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
         (emacs-preview-rs/web-server-set-content emacs-preview:web-index "/" (emacs-preview:preview-template)))))
   (when emacs-preview:browser-open (emacs-preview:open-browser))
   (when emacs-preview:auto-update
-    (add-hook 'buffer-list-update-hook 'emacs-preview:send-to-server)
+    (unless emacs-preview:timer
+      (setq emacs-preview:timer 
+            (run-with-idle-timer emacs-preview:check-change-timer-sec t #'emacs-preview:timer-callback)))
     (add-hook 'post-self-insert-hook #'emacs-preview:send-to-server)
     (run-hooks 'emacs-preview:auto-hook))
   (add-hook 'after-save-hook #'emacs-preview:send-to-server))
@@ -217,7 +229,9 @@ It's useful to remove all dirty hacking with `emacs-preview:auto-hook'."
   (when emacs-preview:web-index
     (emacs-preview-rs/web-server-stop emacs-preview:web-index)
     (setq emacs-preview:web-index nil))
-  (remove-hook 'buffer-list-update-hook 'emacs-preview:send-to-server)
+  (when emacs-preview:timer
+    (cancel-timer emacs-preview:timer)
+    (setq emacs-preview:timer nil))
   (remove-hook 'post-self-insert-hook 'emacs-preview:send-to-server)
   (remove-hook 'after-save-hook 'emacs-preview:send-to-server))
 

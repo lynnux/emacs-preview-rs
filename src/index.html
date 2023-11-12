@@ -72,6 +72,7 @@
         setInterval(function(){
           $.get("/get_content_index", function(data, status){
           if (last_content_index != data) {
+            last_content_index = data;
             $.get("/get_content", function(data, status){
             callback(data)
             });
