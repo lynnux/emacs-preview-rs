@@ -2,33 +2,32 @@
 // https://github.com/hyperium/hyper/blob/0.14.x/examples/send_file.rs
 // https://github.com/hyperium/hyper/blob/0.14.x/examples/single_threaded.rs
 
-use emacs::{defun, Vector};
-use once_cell::sync::Lazy;
-use std::thread::JoinHandle;
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Barrier},
-};
-use tokio::sync::oneshot;
-use tokio::fs::File;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Error, Response, Server, Body, StatusCode, Request, Result};
-use tokio_util::codec::{BytesCodec, FramedRead};
-use dashmap::DashMap;
 use arc_swap::ArcSwap;
+use dashmap::DashMap;
+use emacs::{defun, Vector};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Error, Request, Response, Result, Server, StatusCode};
+use once_cell::sync::Lazy;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Barrier,
+};
+use std::thread::JoinHandle;
+use tokio::fs::File;
+use tokio::sync::oneshot;
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 struct Web {
     handle: Option<(JoinHandle<()>, oneshot::Sender<()>)>, // 线程join和信号send都需要self
     web_context: Arc<WebContext>,
 }
 struct WebContext {
-    web_root: ArcSwap<Vec<String>>, // ArcSwap<String>代替Mutex<String>
+    web_root: ArcSwap<Vec<String>>,   // ArcSwap<String>代替Mutex<String>
     content: DashMap<String, String>, // DashMap<path, content>，代替Mutex<HashMap<...>>
 }
-impl WebContext{
+impl WebContext {
     fn get_content(&self, path: &String) -> Option<String> {
-        if let Some(ref r) = self.content.get(path){
+        if let Some(ref r) = self.content.get(path) {
             return Some(r.value().clone());
         }
         None
@@ -61,7 +60,7 @@ fn not_found(filename: String) -> Response<Body> {
         .unwrap()
 }
 async fn simple_file_send(root: &Vec<String>, filename: String) -> Result<Response<Body>> {
-    for r in root{
+    for r in root {
         let mut filename = filename.clone();
         filename.insert_str(0, r.as_str());
         // debug_msg(&format!("send file: {}", filename));
@@ -75,10 +74,13 @@ async fn simple_file_send(root: &Vec<String>, filename: String) -> Result<Respon
 }
 
 async fn response_examples(req: Request<Body>, context: Arc<WebContext>) -> Result<Response<Body>> {
-    let path : String = req.uri().path().into();
-    if let Some(c) = (*context).get_content(&path){
+    use percent_encoding::percent_decode_str;
+    let path: String = percent_decode_str(req.uri().path())
+        .decode_utf8_lossy()
+        .into_owned();
+    if let Some(c) = (*context).get_content(&path) {
         Ok(Response::new(c.into()))
-    }else{
+    } else {
         let root = (*context).web_root.load();
         simple_file_send(&**root, path).await
     }
@@ -89,12 +91,17 @@ async fn response_examples(req: Request<Body>, context: Arc<WebContext>) -> Resu
 // (emacs-preview-rs/web-server-set-root 2 "f:/prj/rust/emacs-preview-rs/src/")
 // (emacs-preview-rs/web-server-stop 2)
 // (emacs-preview-rs/web-server-set-content 2 "/" "<center>aaa</center>")
-async fn run(web_context : Arc<WebContext>, host: String, port: u16, stop_sig: oneshot::Receiver<()>) {
+async fn run(
+    web_context: Arc<WebContext>,
+    host: String,
+    port: u16,
+    stop_sig: oneshot::Receiver<()>,
+) {
     debug_msg(&format!("run: {}:{}", host, port));
     if let Ok(addr) = format!("{}:{}", host, port).parse() {
-        let make_service = make_service_fn(|_|{
+        let make_service = make_service_fn(|_| {
             let web_context = web_context.clone();
-            async  {
+            async {
                 Ok::<_, Error>(service_fn(move |req| {
                     let web_context = web_context.clone();
                     response_examples(req, web_context)
@@ -108,16 +115,10 @@ async fn run(web_context : Arc<WebContext>, host: String, port: u16, stop_sig: o
         });
         debug_msg(&format!("Listening on http://{}", addr));
         if let Err(e) = server.await {
-            debug_msg(&format!(
-                "server error:{}, {}:{}",
-                e, host, port
-            ));
+            debug_msg(&format!("server error:{}, {}:{}", e, host, port));
         }
     } else {
-        debug_msg(&format!(
-            "failed parse addr: {}:{}",
-            host, port
-        ));
+        debug_msg(&format!("failed parse addr: {}:{}", host, port));
     }
 }
 
@@ -143,8 +144,11 @@ fn web_server_start(host: String, port: u16) -> emacs::Result<usize> {
     let run_result2 = run_result.clone();
     let barrier = Arc::new(Barrier::new(2));
     let b2 = barrier.clone();
-    
-    let web_context = Arc::new(WebContext{content: DashMap::new(), web_root: ArcSwap::new(Arc::new(Vec::new()))});
+
+    let web_context = Arc::new(WebContext {
+        content: DashMap::new(),
+        web_root: ArcSwap::new(Arc::new(Vec::new())),
+    });
     let web_context1 = web_context.clone();
     let tj = std::thread::spawn(move || {
         if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
@@ -158,10 +162,7 @@ fn web_server_start(host: String, port: u16) -> emacs::Result<usize> {
                 run(web_context, host, port, sr).await;
             });
         } else {
-            debug_msg(&format!(
-                "failed to start tokio thread: {}:{}",
-                host, port 
-            ));
+            debug_msg(&format!("failed to start tokio thread: {}:{}", host, port));
             b2.wait();
         }
     });
@@ -172,7 +173,7 @@ fn web_server_start(host: String, port: u16) -> emacs::Result<usize> {
 
     let web = Web {
         handle: Some((tj, ss)),
-        web_context: web_context1
+        web_context: web_context1,
     };
     GLOBAL_WEB_COOKIE.fetch_add(1, Ordering::SeqCst);
     let web_index = GLOBAL_WEB_COOKIE.load(Ordering::SeqCst);
@@ -193,7 +194,7 @@ fn web_server_stop(web_index: usize) -> emacs::Result<bool> {
 
 #[defun]
 fn web_server_set_root(web_index: usize, web_roots: Vector) -> emacs::Result<bool> {
-    let mut v:Vec<String> = Vec::new();
+    let mut v: Vec<String> = Vec::new();
     for i in 0..web_roots.len() {
         if let Ok(web_root) = web_roots.get::<String>(i) {
             let web_root = web_root.replace("\\", "/");
@@ -214,15 +215,17 @@ fn web_server_set_content(web_index: usize, path: String, content: String) -> em
     if let Some(ref web) = GLOBAL_WEBS.get(&web_index) {
         let mut path_index = path.clone();
         web.web_context.content.insert(path, content);
-        
+
         // 创建一个_index用于记录内容是否变化的标记
         path_index += "_index";
         GLOBAL_WEB_COOKIE.fetch_add(1, Ordering::SeqCst);
-        web.web_context.content.insert(path_index, format!("{}", GLOBAL_WEB_COOKIE.load(Ordering::SeqCst)));
+        web.web_context.content.insert(
+            path_index,
+            format!("{}", GLOBAL_WEB_COOKIE.load(Ordering::SeqCst)),
+        );
     }
     Ok(true)
 }
-
 
 // Emacs won't load the module without this.
 emacs::plugin_is_GPL_compatible!();
